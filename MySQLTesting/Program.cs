@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using MySQLTesting.Employees;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -12,11 +13,20 @@ namespace MySQLTesting
     class salaryGroupData
     {
         public int EmployeeId { get; set; }
-        public Double AvgSalary { get; set; }
+        public Double SalaryCalculation { get; set; }
+    }
+
+    class SalaryTwo
+    {
+        public int employeeId { get; set; }
+        public Double SalarySum { get; set; }
     }
 
     class Program
     {
+        // This is the line that connects to Redis
+        // You can specify the server as a connection string in the
+        // new RedisContext("connection-string-here");
         public static RedisContext redis = new RedisContext();
 
         static void Main(string[] args)
@@ -29,17 +39,19 @@ namespace MySQLTesting
             string redisKey = "employeesResult";
 
             //ReadData();
-            var data = redis.Cache.FetchObject<List<salaryGroupData>>(
+            List<salaryGroupData> data = redis.Cache.FetchObject<List<salaryGroupData>>(
                 redisKey,
-                () => ReadDataFromDB(),
+                () => CommonSQLWhere(),
                 TimeSpan.FromMinutes(3)
                 );
 
+            var res = TransformData(data);
+
             stopWatchRedis.Stop();
 
-            foreach (var message in from result in data.OrderByDescending((x) => x.AvgSalary)
+            foreach (var message in from result in res.OrderByDescending((x) => x.SalarySum)
                                     let message = new StringBuilder()
-                      .AppendLine($"EmployeeID: {result.EmployeeId}, AvgSalary: {result.AvgSalary}")
+                      .AppendLine($"EmployeeID: {result.employeeId}, AvgSalary: {result.SalarySum}")
                                     select message)
             {
                 Console.WriteLine(message.ToString());
@@ -78,7 +90,7 @@ namespace MySQLTesting
             }
         }
 
-        private static List<salaryGroupData> ReadDataFromDB()
+        private static List<salaryGroupData> CommonSQLWhere()
         {
             using (var context = new Employees.employeesContext())
             {
@@ -87,15 +99,15 @@ namespace MySQLTesting
                                        join s in context.Salaries
                                        on e.EmpNo equals s.EmpNo
                                        where s.FromDate >= dateTime
-                                       group s by e.EmpNo into sGroup
-                                       select new salaryGroupData
-                                       {
-                                           EmployeeId = sGroup.Key,
-                                           AvgSalary = sGroup.Average(x => x.Salary)
-                                       };
+                                       select new salaryGroupData { EmployeeId = e.EmpNo, SalaryCalculation = s.Salary };
 
                 return orderedQueryable.ToList();
             }
+        }
+
+        private static List<SalaryTwo> TransformData(List<salaryGroupData> l)
+        {
+            return l.GroupBy(x => x.EmployeeId).Select(y => new SalaryTwo { employeeId = y.Key, SalarySum = y.Sum(x => x.SalaryCalculation) }).ToList();
         }
     }
 }
